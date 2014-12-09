@@ -2,8 +2,11 @@ var ring = require('webrtc-ring');
 var srt = require('simple-raytracer');
 var fs = require('fs');
 var workify = require('webworkify');
+var w = workify(require('./raytracer-worker.js'));
+
 var log = require('bows')('rbp2p');
 var domready = require('domready');
+
 
 window.app = {
   init: function () {
@@ -16,11 +19,12 @@ window.app = {
     var endTime;
     var scene;
     var tasks;
-    var N_UNITS;
-    var N_BROWSERS = 5;
+    var N_UNITS = 50;
+    var N_BROWSERS = 10;
     var results = {};
     var resultsCount = 0;
     var node = ring.createNode(nodeConfig);
+    
 
     node.e.on('ready', ready);
     node.e.on('message', messageReceived);
@@ -32,13 +36,14 @@ window.app = {
 
       var scene_file = fs.readFileSync('./scenes/pokeball.rt', 'utf8');
       scene = srt.prepareScene.byFile(scene_file);
-      N_UNITS = 5;
 
       tasks = srt.prepareTasks({
         split: N_UNITS, 
         width: scene.global.width,
         height: scene.global.height
-      });      
+      });
+
+      log('A TASK: ', tasks[0]);
 
       // enable interaction to start through a button
 
@@ -75,7 +80,7 @@ window.app = {
         for(var i=0;i<tasksPerBrowser;i++) {
           node.send(destId, {
                               type: 'task',
-                              task: 'hey this is a task',
+                              task: tasks[i+offset],
                               origin: node.id()
                             });
           log('send task to: ', destId);
@@ -90,13 +95,33 @@ window.app = {
     function messageReceived(message) {
       if (message.type === 'task') {
         log('Received Task');
-        node.send(message.origin, {
-                                    type: 'result',
-                                    result: {
-                                      id: Math.random() + '',
-                                      data: 'some result data'
-                                    }
-                                  });
+
+        // message.task
+        // message.task.id
+
+        // create a worker here
+        // when worker finishes, babam! 
+
+        w.addEventListener('message', function (ev) {
+          if (ev.data.id !== message.task.id) {
+            // console.log('not same id', ev.data.id, message.task.id);
+            return; // not the event I expected
+          } 
+          
+          node.send(message.origin, {
+                            type: 'result',
+                            result: {
+                              id: message.task.id//,
+                              // data: ev.data.result
+                            }
+                          });
+        });
+
+        w.postMessage({
+          task: message.task,
+          scene: scene
+        }); // send the worker a message
+
       }
       if (message.type === 'result') {
         log('Received result');
@@ -125,6 +150,8 @@ window.app = {
     function finalize() {
       endTime = Date.now();
       log('Ended at: ', endTime);
+      var diff = endTime - startTime;
+      log('It took: ' + diff + ' ms');
     }
 
     // var w = workify(require('./raytracer-worker.js'));
